@@ -409,18 +409,35 @@ async def on_meshtastic_message_async(packet, interface):
 # Meshtastic new node handler
 async def on_node_updated_async(node_id):
     if meshtastic_interface is None:
+        logger.error("Meshtastic interface not initialized")
         return
     try:
-        node_info = meshtastic_interface.nodes.get(node_id)
+        # Retry fetching node info
+        node_info = None
+        for attempt in range(3):
+            node_info = meshtastic_interface.nodes.get(node_id)
+            if node_info:
+                break
+            logger.debug(f"Attempt {attempt + 1}: Node {node_id} info not available, retrying...")
+            await asyncio.sleep(1)
         if not node_info:
+            logger.error(f"Node {node_id} info not found after retries")
             return
+
         long_name = node_info.get("user", {}).get("longName", "Unknown")
         data["nodes"][node_id] = long_name
         save_data(data)
+        logger.debug(f"Saved node {node_id} with name {long_name}")
+
         channel = bot.get_channel(int(MESHTASTIC_NODE_CHANNEL_ID))
         if not channel:
-            logger.error(f"Error: Could not find node channel {MESHTASTIC_NODE_CHANNEL_ID}")
+            logger.error(f"Could not find node channel {MESHTASTIC_NODE_CHANNEL_ID}")
+            # Notify admin channel if set
+            admin_channel = bot.get_channel(int(ADMIN_LOG_CHANNEL_ID)) if ADMIN_LOG_CHANNEL_ID else None
+            if admin_channel:
+                await admin_channel.send(f"Error: Node channel {MESHTASTIC_NODE_CHANNEL_ID} not found. Please check configuration.")
             return
+
         embed = discord.Embed(
             title="New Meshtastic Node Detected",
             description=f"A new node has joined the network.",
@@ -432,8 +449,16 @@ async def on_node_updated_async(node_id):
         embed.add_field(name="Channel", value=channel.name, inline=True)
         embed.set_footer(text="Node joined via Meshtastic")
         await channel.send(embed=embed)
+        logger.info(f"Sent new node notification for {node_id} to channel {MESHTASTIC_NODE_CHANNEL_ID}")
+    except discord.errors.Forbidden:
+        logger.error(f"Bot lacks permission to send messages to channel {MESHTASTIC_NODE_CHANNEL_ID}")
+        admin_channel = bot.get_channel(int(ADMIN_LOG_CHANNEL_ID)) if ADMIN_LOG_CHANNEL_ID else None
+        if admin_channel:
+            await admin_channel.send(f"Error: Bot lacks permission to send to node channel {MESHTASTIC_NODE_CHANNEL_ID}.")
+    except discord.errors.HTTPException as e:
+        logger.error(f"Failed to send message to channel {MESHTASTIC_NODE_CHANNEL_ID}: {e}")
     except Exception as e:
-        logger.error(f"Error processing new node: {e}")
+        logger.error(f"Error processing new node {node_id}: {e}", exc_info=True)
 
 # Synchronous wrappers
 def on_meshtastic_message(packet, interface):
