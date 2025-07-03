@@ -118,7 +118,7 @@
 
  ## 💬 Support
 
- For help with setup, usage, or troubleshooting, join our [Discord community](https://discord.gg/jjG96u6VNK) to connect with other users and get assistance.
+ For help with setup, usage, or troubleshooting, join our [Discord community](https://discord.gg/Muqgg2eu) to connect with other users and get assistance.
 
  ## 📜 License
 
