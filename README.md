@@ -209,6 +209,8 @@ DM issues: Enable “Allow direct messages from server members” in Discord set
 Meshtastic errors: Verify the serial port (e.g., COM3) and test with the Meshtastic CLI.
 File permissions: Ensure JSON files (data.json, etc.) are writable.
 
+💬 Support
+For help with setup, usage, or troubleshooting, join our Discord community to connect with other users and get assistance.
 📜 License
 This project is licensed under the MIT License.
 🙌 Contributing
