@@ -1,0 +1,8 @@
+# Sensitive files
+.env
+
+# Log files
+bot.log
+
+# Data files
+*.json
