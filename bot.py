@@ -13,6 +13,7 @@ import secrets
 import time
 import logging
 from logging.handlers import RotatingFileHandler
+from typing import Dict, List, Any, Optional
 
 # Set up logging
 logging.basicConfig(
@@ -29,14 +30,14 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 # Retrieve environment variables
-BOT_TOKEN = os.getenv('BOT_TOKEN')
-GUILD_ID = os.getenv('GUILD_ID')
-MESHTASTIC_CHANNEL_ID = os.getenv('MESHTASTIC_CHANNEL_ID')
-MESHTASTIC_NODE_CHANNEL_ID = os.getenv('MESHTASTIC_NODE_CHANNEL_ID')
-ADMIN_ROLE_ID = os.getenv('ADMIN_ROLE_ID')
-NODE_OWNER_ROLE_ID = os.getenv('NODE_OWNER_ROLE_ID')
-MESHTASTIC_PORT = os.getenv('MESHTASTIC_PORT')
-ADMIN_LOG_CHANNEL_ID = os.getenv('ADMIN_LOG_CHANNEL_ID')
+BOT_TOKEN: Optional[str] = os.getenv('BOT_TOKEN')
+GUILD_ID: Optional[str] = os.getenv('GUILD_ID')
+MESHTASTIC_CHANNEL_ID: Optional[str] = os.getenv('MESHTASTIC_CHANNEL_ID')
+MESHTASTIC_NODE_CHANNEL_ID: Optional[str] = os.getenv('MESHTASTIC_NODE_CHANNEL_ID')
+ADMIN_ROLE_ID: Optional[str] = os.getenv('ADMIN_ROLE_ID')
+NODE_OWNER_ROLE_ID: Optional[str] = os.getenv('NODE_OWNER_ROLE_ID')
+MESHTASTIC_PORT: Optional[str] = os.getenv('MESHTASTIC_PORT')
+ADMIN_LOG_CHANNEL_ID: Optional[str] = os.getenv('ADMIN_LOG_CHANNEL_ID')
 
 # Debug: Log loaded environment variables
 logger.debug(f"Loaded BOT_TOKEN: {BOT_TOKEN}")
@@ -49,7 +50,7 @@ logger.debug(f"Loaded MESHTASTIC_PORT: {MESHTASTIC_PORT}")
 logger.debug(f"Loaded ADMIN_LOG_CHANNEL_ID: {ADMIN_LOG_CHANNEL_ID}")
 
 # Check required environment variables
-required_vars = {
+required_vars: Dict[str, Optional[str]] = {
     'BOT_TOKEN': BOT_TOKEN,
     'GUILD_ID': GUILD_ID,
     'MESHTASTIC_CHANNEL_ID': MESHTASTIC_CHANNEL_ID,
@@ -58,18 +59,18 @@ required_vars = {
     'NODE_OWNER_ROLE_ID': NODE_OWNER_ROLE_ID,
     'MESHTASTIC_PORT': MESHTASTIC_PORT
 }
-missing_vars = [key for key, value in required_vars.items() if value is None]
+missing_vars: List[str] = [key for key, value in required_vars.items() if value is None]
 if missing_vars:
     raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
 
 # Discord log handler
 class DiscordLogHandler(logging.Handler):
-    def __init__(self, bot):
+    def __init__(self, bot: commands.Bot):
         super().__init__()
         self.bot = bot
-        self.queue = asyncio.Queue()
+        self.queue: asyncio.Queue = asyncio.Queue()
 
-    def emit(self, record):
+    def emit(self, record: logging.LogRecord):
         if not ADMIN_LOG_CHANNEL_ID:
             return
         log_message = self.format(record)
@@ -93,12 +94,17 @@ class DiscordLogHandler(logging.Handler):
         )
 
 # Discord log message sender
-async def discord_log_sender(bot, queue):
+async def discord_log_sender(bot: commands.Bot, queue: asyncio.Queue):
     channel = bot.get_channel(int(ADMIN_LOG_CHANNEL_ID)) if ADMIN_LOG_CHANNEL_ID else None
     if not channel:
         logger.warning("Admin log channel not found or not set; Discord logging disabled")
         return
     while True:
+        if queue.qsize() > 100:  # Prevent queue overflow
+            logger.error("Discord log queue overflow; clearing queue")
+            while not queue.empty():
+                queue.get_nowait()
+                queue.task_done()
         embed = await queue.get()
         try:
             await channel.send(embed=embed)
@@ -108,58 +114,61 @@ async def discord_log_sender(bot, queue):
         queue.task_done()
 
 # Paths for persistent JSON storage
-DATA_FILE = "data.json"
-OWNERS_FILE = "owners.json"
-MESSAGES_FILE = "messages.json"
-ABOUT_FILE = "about.json"
-ALERTS_FILE = "alerts.json"
-PREFERENCES_FILE = "preferences.json"
+DATA_FILE: str = "data.json"
+OWNERS_FILE: str = "owners.json"
+MESSAGES_FILE: str = "messages.json"
+ABOUT_FILE: str = "about.json"
+ALERTS_FILE: str = "alerts.json"
+PREFERENCES_FILE: str = "preferences.json"
 
 # Message size limit (500MB in bytes)
-MAX_MESSAGES_FILE_SIZE = 500_000_000
-MAX_PREFERENCES_FILE_SIZE = 10_000_000
+MAX_MESSAGES_FILE_SIZE: int = 500_000_000
+MAX_PREFERENCES_FILE_SIZE: int = 10_000_000
 
 # Reboot tracking
-reboot_in_progress = False
-reboot_start_time = 0
+reboot_in_progress: bool = False
+reboot_start_time: float = 0
 
 # Initialize or load JSON data
-def load_data():
+def load_data() -> Dict[str, Any]:
     try:
         with open(DATA_FILE, 'r') as f:
             return json.load(f)
-    except FileNotFoundError:
+    except (FileNotFoundError, json.JSONDecodeError):
+        logger.warning(f"Failed to load {DATA_FILE}; returning default")
         return {"nodes": {}, "settings": {}}
 
-def save_data(data):
+def save_data(data: Dict[str, Any]) -> None:
     try:
         with open(DATA_FILE, 'w') as f:
             json.dump(data, f, indent=4)
     except IOError as e:
         logger.error(f"Failed to save data to {DATA_FILE}: {e}")
 
-def load_owners():
+def load_owners() -> Dict[str, str]:
     try:
         with open(OWNERS_FILE, 'r') as f:
             return json.load(f)
-    except FileNotFoundError:
+    except (FileNotFoundError, json.JSONDecodeError):
+        logger.warning(f"Failed to load {OWNERS_FILE}; returning default")
         return {}
 
-def save_owners(owners):
+def save_owners(owners: Dict[str, str]) -> None:
     try:
         with open(OWNERS_FILE, 'w') as f:
             json.dump(owners, f, indent=4)
     except IOError as e:
         logger.error(f"Failed to save owners to {OWNERS_FILE}: {e}")
 
-def load_messages():
+def load_messages() -> List[Dict[str, Any]]:
     try:
         with open(MESSAGES_FILE, 'r') as f:
             return json.load(f)
-    except FileNotFoundError:
+    except (FileNotFoundError, json.JSONDecodeError):
+        logger.warning(f"Failed to load {MESSAGES_FILE}; returning default")
         return []
 
-def save_messages(messages):
+def save_messages(messages: List[Dict[str, Any]]) -> None:
     try:
         with open(MESSAGES_FILE, 'w') as f:
             json.dump(messages, f, indent=4)
@@ -170,11 +179,12 @@ def save_messages(messages):
     except IOError as e:
         logger.error(f"Failed to save messages to {MESSAGES_FILE}: {e}")
 
-def load_about():
+def load_about() -> Dict[str, Any]:
     try:
         with open(ABOUT_FILE, 'r') as f:
             return json.load(f)
-    except FileNotFoundError:
+    except (FileNotFoundError, json.JSONDecodeError):
+        logger.warning(f"Failed to load {ABOUT_FILE}; returning default")
         return {
             "bot_version": "1.0.0",
             "network_size": 0,
@@ -183,35 +193,37 @@ def load_about():
             "custom_message": ""
         }
 
-def save_about(about):
+def save_about(about: Dict[str, Any]) -> None:
     try:
         with open(ABOUT_FILE, 'w') as f:
             json.dump(about, f, indent=4)
     except IOError as e:
         logger.error(f"Failed to save about to {ABOUT_FILE}: {e}")
 
-def load_alerts():
+def load_alerts() -> List[Dict[str, Any]]:
     try:
         with open(ALERTS_FILE, 'r') as f:
             return json.load(f)
-    except FileNotFoundError:
+    except (FileNotFoundError, json.JSONDecodeError):
+        logger.warning(f"Failed to load {ALERTS_FILE}; returning default")
         return []
 
-def save_alerts(alerts):
+def save_alerts(alerts: List[Dict[str, Any]]) -> None:
     try:
         with open(ALERTS_FILE, 'w') as f:
             json.dump(alerts, f, indent=4)
     except IOError as e:
         logger.error(f"Failed to save alerts to {ALERTS_FILE}: {e}")
 
-def load_preferences():
+def load_preferences() -> Dict[str, Dict[str, bool]]:
     try:
         with open(PREFERENCES_FILE, 'r') as f:
             return json.load(f)
-    except FileNotFoundError:
+    except (FileNotFoundError, json.JSONDecodeError):
+        logger.warning(f"Failed to load {PREFERENCES_FILE}; returning default")
         return {}
 
-def save_preferences(preferences):
+def save_preferences(preferences: Dict[str, Dict[str, bool]]) -> None:
     try:
         with open(PREFERENCES_FILE, 'w') as f:
             json.dump(preferences, f, indent=4)
@@ -224,13 +236,13 @@ def save_preferences(preferences):
         logger.error(f"Failed to save preferences to {PREFERENCES_FILE}: {e}")
 
 # Initialize data
-data = load_data()
-owners = load_owners()
-pending_claims = {}
-messages = load_messages()
-about = load_about()
-alerts = load_alerts()
-preferences = load_preferences()
+data: Dict[str, Any] = load_data()
+owners: Dict[str, str] = load_owners()
+pending_claims: Dict[str, Dict[str, Any]] = {}
+messages: List[Dict[str, Any]] = load_messages()
+about: Dict[str, Any] = load_about()
+alerts: List[Dict[str, Any]] = load_alerts()
+preferences: Dict[str, Dict[str, bool]] = load_preferences()
 
 # Set up the bot with intents
 intents = discord.Intents.default()
@@ -250,11 +262,24 @@ except Exception as e:
     logger.error(f"Failed to connect to Meshtastic on {MESHTASTIC_PORT}: {e}")
     meshtastic_interface = None
 
+# Emoji constants
+EMOJIS = {
+    "next": "\u27a1\ufe0f",  # ➡️
+    "cancel": "\u274c",      # ❌
+    "back": "\u2b05\ufe0f",  # ⬅️
+    "yes": "\u2705",         # ✅
+    "no": "\u274c",          # ❌
+    "skip": "\u23ed\ufe0f"   # ⏭️
+}
+
 # Background task to check node status after reboot
 async def check_node_status():
-    global reboot_in_progress, meshtastic_interface
+    global reboot_in_progress, reboot_start_time, meshtastic_interface
     while True:
         if reboot_in_progress and meshtastic_interface:
+            if time.time() - reboot_start_time > 300:  # 5-minute timeout
+                reboot_in_progress = False
+                logger.warning("Reboot check timed out after 5 minutes")
             try:
                 node_info = meshtastic_interface.getMyNodeInfo()
                 if node_info:
@@ -273,6 +298,16 @@ async def check_node_status():
             except Exception as e:
                 logger.error(f"Failed to check node status: {e}")
         await asyncio.sleep(10)
+
+# Background task to prune expired pending claims
+async def prune_pending_claims():
+    while True:
+        current_time = time.time()
+        to_remove = [user_id for user_id, claim in list(pending_claims.items()) if current_time - claim["timestamp"] > 300]
+        for user_id in to_remove:
+            del pending_claims[user_id]
+            logger.info(f"Expired pending claim for user {user_id}")
+        await asyncio.sleep(60)
 
 # Background task to handle scheduled alerts
 async def check_alerts():
@@ -314,7 +349,7 @@ async def check_alerts():
         await asyncio.sleep(60)
 
 # Meshtastic message handler
-async def on_meshtastic_message_async(packet, interface):
+async def on_meshtastic_message_async(packet: Dict[str, Any], interface: Any):
     if meshtastic_interface is None:
         return
     if packet.get("decoded", {}).get("portnum") == "TEXT_MESSAGE_APP":
@@ -381,7 +416,8 @@ async def on_meshtastic_message_async(packet, interface):
                 logger.error(f"Error: Could not find channel {MESHTASTIC_CHANNEL_ID}")
                 return
             snr = packet.get("rxSnr", "N/A")
-            battery = packet.get("batteryLevel", "N/A")
+            node_info = meshtastic_interface.nodes.get(sender_id, {})
+            battery = node_info.get("batteryLevel", "N/A")
             if isinstance(battery, int):
                 battery = f"{battery}%"
             embed = discord.Embed(
@@ -407,7 +443,7 @@ async def on_meshtastic_message_async(packet, interface):
             logger.error(f"Error processing Meshtastic message: {e}")
 
 # Meshtastic new node handler
-async def on_node_updated_async(node_id):
+async def on_node_updated_async(node_id: str):
     if meshtastic_interface is None:
         logger.error("Meshtastic interface not initialized")
         return
@@ -461,13 +497,13 @@ async def on_node_updated_async(node_id):
         logger.error(f"Error processing new node {node_id}: {e}", exc_info=True)
 
 # Synchronous wrappers
-def on_meshtastic_message(packet, interface):
+def on_meshtastic_message(packet: Dict[str, Any], interface: Any):
     asyncio.run_coroutine_threadsafe(
         on_meshtastic_message_async(packet, interface),
         bot.loop
     )
 
-def on_node_updated(node_id):
+def on_node_updated(node_id: str):
     asyncio.run_coroutine_threadsafe(
         on_node_updated_async(node_id),
         bot.loop
@@ -479,7 +515,7 @@ if meshtastic_interface:
     pub.subscribe(on_node_updated, "meshtastic.node.updated")
 
 # Setup wizard sessions
-setup_sessions = {}  # {user_id: {"step": float, "message_id": int, "node_claimed": bool, "dm_notifications": bool, "timestamp": float}}
+setup_sessions: Dict[str, Dict[str, Any]] = {}  # {user_id: {"step": float, "message_id": int, "node_claimed": bool, "dm_notifications": bool, "timestamp": float}}
 
 # Event: Bot is ready and connected
 @bot.event
@@ -487,6 +523,7 @@ async def on_ready():
     logger.info(f'Logged in as {bot.user.name}')
     bot.loop.create_task(discord_log_sender(bot, discord_log_handler.queue))
     bot.loop.create_task(check_node_status())
+    bot.loop.create_task(prune_pending_claims())
     bot.loop.create_task(check_alerts())
     try:
         guild = discord.Object(id=GUILD_ID)
@@ -524,13 +561,13 @@ async def on_ready():
         logger.error(f'Error syncing commands: {e}')
 
 # Setup wizard steps
-async def send_welcome_step(user, session):
+async def send_welcome_step(user: discord.User, session: Dict[str, Any]) -> Optional[discord.Message]:
     try:
         embed = discord.Embed(
             title="Welcome to Meshtastic Bot Setup!",
             description="This wizard will guide you through setting up your Meshtastic node and preferences.\n\n"
-                        "Use the reactions below to navigate:\n"
-                        "➡️ Next | ❌ Cancel",
+                        f"Use the reactions below to navigate:\n"
+                        f"{EMOJIS['next']} Next | {EMOJIS['cancel']} Cancel",
             color=discord.Color.from_rgb(114, 137, 218),
             timestamp=datetime.now(timezone.utc)
         )
@@ -538,14 +575,14 @@ async def send_welcome_step(user, session):
         embed.set_footer(text="Step 1/4 | Meshtastic Setup")
         message = await user.send(embed=embed)
         session["message_id"] = message.id
-        for emoji in ["➡️", "❌"]:
+        for emoji in [EMOJIS["next"], EMOJIS["cancel"]]:
             await message.add_reaction(emoji)
         return message
     except discord.Forbidden:
         logger.warning(f"Cannot send welcome step DM to user {user.name}")
         return None
 
-async def send_node_claim_step(user, session):
+async def send_node_claim_step(user: discord.User, session: Dict[str, Any]) -> Optional[discord.Message]:
     try:
         user_id = str(user.id)
         owned_nodes = [node_id for node_id, owner_id in owners.items() if owner_id == user_id]
@@ -554,9 +591,9 @@ async def send_node_claim_step(user, session):
             description += f"You already own {len(owned_nodes)} node(s). Want to claim another?\n\n"
         else:
             description += "You don't own any nodes yet. Let's claim one!\n\n"
-        description += "➡️ Claim Node | ⬅️ Back | ❌ Cancel"
+        description += f"{EMOJIS['next']} Claim Node | {EMOJIS['back']} Back | {EMOJIS['cancel']} Cancel"
         if owned_nodes:
-            description += " | ✅ Skip (I have enough nodes)"
+            description += f" | {EMOJIS['skip']} Skip (I have enough nodes)"
         embed = discord.Embed(
             title="Step 2: Claim a Node",
             description=description,
@@ -566,9 +603,9 @@ async def send_node_claim_step(user, session):
         embed.set_footer(text="Step 2/4 | Meshtastic Setup")
         message = await user.send(embed=embed)
         session["message_id"] = message.id
-        emojis = ["➡️", "⬅️", "❌"]
+        emojis = [EMOJIS["next"], EMOJIS["back"], EMOJIS["cancel"]]
         if owned_nodes:
-            emojis.append("✅")
+            emojis.append(EMOJIS["skip"])
         for emoji in emojis:
             await message.add_reaction(emoji)
         return message
@@ -576,26 +613,26 @@ async def send_node_claim_step(user, session):
         logger.warning(f"Cannot send node claim step DM to user {user.name}")
         return None
 
-async def send_preferences_step(user, session):
+async def send_preferences_step(user: discord.User, session: Dict[str, Any]) -> Optional[discord.Message]:
     try:
         embed = discord.Embed(
             title="Step 3: Set Preferences",
             description="Would you like to receive DM notifications for node events (e.g., new messages from your nodes)?\n\n"
-                        "✅ Yes | ❌ No | ⬅️ Back",
+                        f"{EMOJIS['yes']} Yes | {EMOJIS['no']} No | {EMOJIS['back']} Back",
             color=discord.Color.from_rgb(114, 137, 218),
             timestamp=datetime.now(timezone.utc)
         )
         embed.set_footer(text="Step 3/4 | Meshtastic Setup")
         message = await user.send(embed=embed)
         session["message_id"] = message.id
-        for emoji in ["✅", "❌", "⬅️"]:
+        for emoji in [EMOJIS["yes"], EMOJIS["no"], EMOJIS["back"]]:
             await message.add_reaction(emoji)
         return message
     except discord.Forbidden:
         logger.warning(f"Cannot send preferences step DM to user {user.name}")
         return None
 
-async def send_commands_step(user, session):
+async def send_commands_step(user: discord.User, session: Dict[str, Any]) -> Optional[discord.Message]:
     try:
         embed = discord.Embed(
             title="Step 4: Learn Commands",
@@ -605,14 +642,14 @@ async def send_commands_step(user, session):
                         "- `/nodeinfo <node_id>`: Get node details\n"
                         "- `/help`: See all commands\n\n"
                         "Want to view the full command list now?\n\n"
-                        "✅ Yes (run /help) | ❌ Finish | ⬅️ Back",
+                        f"{EMOJIS['yes']} Yes (run /help) | {EMOJIS['no']} Finish | {EMOJIS['back']} Back",
             color=discord.Color.from_rgb(114, 137, 218),
             timestamp=datetime.now(timezone.utc)
         )
         embed.set_footer(text="Step 4/4 | Meshtastic Setup")
         message = await user.send(embed=embed)
         session["message_id"] = message.id
-        for emoji in ["✅", "❌", "⬅️"]:
+        for emoji in [EMOJIS["yes"], EMOJIS["no"], EMOJIS["back"]]:
             await message.add_reaction(emoji)
         return message
     except discord.Forbidden:
@@ -620,7 +657,7 @@ async def send_commands_step(user, session):
         return None
 
 # Setup wizard reaction handler
-async def handle_setup_reaction(reaction, user):
+async def handle_setup_reaction(reaction: discord.Reaction, user: discord.User):
     user_id = str(user.id)
     if user_id not in setup_sessions or reaction.message.id != setup_sessions[user_id]["message_id"]:
         return
@@ -639,7 +676,7 @@ async def handle_setup_reaction(reaction, user):
         return
 
     # Helper to update session and send new step
-    async def update_step(new_step):
+    async def update_step(new_step: float):
         session["step"] = new_step
         session["timestamp"] = time.time()
         if new_step == 1:
@@ -656,18 +693,18 @@ async def handle_setup_reaction(reaction, user):
 
     try:
         logger.debug(f"Processing reaction {emoji} for user {user.name} on step {current_step}")
-        if emoji == "❌":
+        if emoji == EMOJIS["cancel"]:
             await user.send("Setup wizard cancelled.")
             del setup_sessions[user_id]
             logger.info(f"User {user.name} cancelled setup wizard")
             return
         if current_step == 1:
-            if emoji == "➡️":
+            if emoji == EMOJIS["next"]:
                 await update_step(2)
         elif current_step == 2:
-            if emoji == "⬅️":
+            if emoji == EMOJIS["back"]:
                 await update_step(1)
-            elif emoji == "➡️":
+            elif emoji == EMOJIS["next"]:
                 if meshtastic_interface is None:
                     await user.send("Error: Meshtastic device not connected. Please try again later.")
                     del setup_sessions[user_id]
@@ -690,37 +727,37 @@ async def handle_setup_reaction(reaction, user):
                     if user_id in setup_sessions and session["step"] == 2.5:
                         await user.send("Claim code expired. Let's try again.")
                         await update_step(2)
-            elif emoji == "✅":
+            elif emoji == EMOJIS["skip"]:
                 session["node_claimed"] = True
                 await update_step(3)
         elif current_step == 2.5:
             # Waiting for claim; no reactions processed
             return
         elif current_step == 3:
-            if emoji == "⬅️":
+            if emoji == EMOJIS["back"]:
                 await update_step(2)
-            elif emoji == "✅":
+            elif emoji == EMOJIS["yes"]:
                 session["dm_notifications"] = True
                 await update_step(4)
-            elif emoji == "❌":
+            elif emoji == EMOJIS["no"]:
                 session["dm_notifications"] = False
                 await update_step(4)
         elif current_step == 4:
-            if emoji == "⬅️":
+            if emoji == EMOJIS["back"]:
                 await update_step(3)
-            elif emoji == "✅":
+            elif emoji == EMOJIS["yes"]:
                 preferences[user_id] = {"dm_notifications": session.get("dm_notifications", False)}
                 save_preferences(preferences)
                 logger.debug(f"Sending help embed to user {user.name} on step 4")
                 embed = discord.Embed(
-                    title="🔌 Meshtastic Bot Commands",
+                    title="📡 Meshtastic Bot Commands",
                     description="Welcome to the Meshtastic Discord bot! Use these commands to manage nodes, view network status, and stay updated with alerts. Type `/` in Discord to explore.",
                     color=discord.Color.from_rgb(114, 137, 218),
                     timestamp=datetime.now(timezone.utc)
                 )
                 embed.set_thumbnail(url="https://meshtastic.org/assets/images/meshtastic_logo.png")
                 embed.add_field(
-                    name="📡 Network & Status",
+                    name="🔗 Network & Status",
                     value=(
                         "**/meshtastic_status**: Check node and network status\n"
                         "**/nodeinfo <node_id>**: View details of a specific node (e.g., `!abc123`)"
@@ -728,7 +765,7 @@ async def handle_setup_reaction(reaction, user):
                     inline=True
                 )
                 embed.add_field(
-                    name="📟 Node Management",
+                    name="🛠 Node Management",
                     value=(
                         "**/setup**: Start the interactive setup wizard\n"
                         "**/claimnode**: Claim a node with a code\n"
@@ -748,7 +785,7 @@ async def handle_setup_reaction(reaction, user):
                     inline=True
                 )
                 embed.add_field(
-                    name="🔧 Admin Commands (Requires Admin Role)",
+                    name="🔒 Admin Commands (Requires Admin Role)",
                     value=(
                         "**/addnode <node_id> <user>**: Assign a node to a user\n"
                         "**/removenode <node_id>**: Remove a node’s ownership\n"
@@ -765,7 +802,7 @@ async def handle_setup_reaction(reaction, user):
                 await user.send(embed=embed)
                 del setup_sessions[user_id]
                 logger.info(f"User {user.name} completed setup wizard with /help")
-            elif emoji == "❌":
+            elif emoji == EMOJIS["no"]:
                 preferences[user_id] = {"dm_notifications": session.get("dm_notifications", False)}
                 save_preferences(preferences)
                 await user.send("Setup complete! Use `/help` to explore commands.")
@@ -781,7 +818,7 @@ async def handle_setup_reaction(reaction, user):
 
 # Event: Reaction added
 @bot.event
-async def on_reaction_add(reaction, user):
+async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
     if user.bot:
         return
     await handle_setup_reaction(reaction, user)
@@ -825,14 +862,14 @@ async def setup(interaction: discord.Interaction):
 async def help(interaction: discord.Interaction):
     try:
         embed = discord.Embed(
-            title="🔌 Meshtastic Bot Commands",
+            title="📡 Meshtastic Bot Commands",
             description="Welcome to the Meshtastic Discord bot! Use these commands to manage nodes, view network status, and stay updated with alerts. Type `/` in Discord to explore.",
             color=discord.Color.from_rgb(114, 137, 218),
             timestamp=datetime.now(timezone.utc)
         )
         embed.set_thumbnail(url="https://meshtastic.org/assets/images/meshtastic_logo.png")
         embed.add_field(
-            name="📡 Network & Status",
+            name="🔗 Network & Status",
             value=(
                 "**/meshtastic_status**: Check node and network status\n"
                 "**/nodeinfo <node_id>**: View details of a specific node (e.g., `!abc123`)"
@@ -840,7 +877,7 @@ async def help(interaction: discord.Interaction):
             inline=True
         )
         embed.add_field(
-            name="📟 Node Management",
+            name="🛠 Node Management",
             value=(
                 "**/setup**: Start the interactive setup wizard\n"
                 "**/claimnode**: Claim a node with a code\n"
@@ -860,7 +897,7 @@ async def help(interaction: discord.Interaction):
             inline=True
         )
         embed.add_field(
-            name="🔧 Admin Commands (Requires Admin Role)",
+            name="🔒 Admin Commands (Requires Admin Role)",
             value=(
                 "**/addnode <node_id> <user>**: Assign a node to a user\n"
                 "**/removenode <node_id>**: Remove a node’s ownership\n"
@@ -889,10 +926,8 @@ async def help(interaction: discord.Interaction):
 
 # Slash command: /clearalerts
 @app_commands.command(name="clearalerts", description="Admin: Clear all scheduled alerts")
+@app_commands.checks.has_role(int(ADMIN_ROLE_ID))
 async def clearalerts(interaction: discord.Interaction):
-    if not any(role.id == int(ADMIN_ROLE_ID) for role in interaction.user.roles):
-        await interaction.response.send_message("Error: You need the admin role to use this command.", ephemeral=True)
-        return
     try:
         alerts = load_alerts()
         if not alerts:
@@ -930,10 +965,8 @@ async def clearalerts(interaction: discord.Interaction):
 # Slash command: /deletealert
 @app_commands.command(name="deletealert", description="Admin: Delete a scheduled alert by index")
 @app_commands.describe(index="The alert index from /listalerts")
+@app_commands.checks.has_role(int(ADMIN_ROLE_ID))
 async def deletealert(interaction: discord.Interaction, index: int):
-    if not any(role.id == int(ADMIN_ROLE_ID) for role in interaction.user.roles):
-        await interaction.response.send_message("Error: You need the admin role to use this command.", ephemeral=True)
-        return
     try:
         alerts = load_alerts()
         if not alerts or index < 1 or index > len(alerts):
@@ -1015,10 +1048,8 @@ async def listalerts(interaction: discord.Interaction):
     to_discord="Send to Discord channel (default: True)",
     to_mesh="Send to Meshtastic network (default: False)"
 )
+@app_commands.checks.has_role(int(ADMIN_ROLE_ID))
 async def alert(interaction: discord.Interaction, message: str, frequency: str, to_discord: bool = True, to_mesh: bool = False):
-    if not any(role.id == int(ADMIN_ROLE_ID) for role in interaction.user.roles):
-        await interaction.response.send_message("Error: You need the admin role to use this command.", ephemeral=True)
-        return
     valid_frequencies = ["once", "hourly", "daily", "weekly"]
     if frequency.lower() not in valid_frequencies:
         await interaction.response.send_message(f"Error: Frequency must be one of {', '.join(valid_frequencies)}.", ephemeral=True)
@@ -1125,11 +1156,9 @@ async def about(interaction: discord.Interaction):
 # Slash command: /reboot
 @app_commands.command(name="reboot", description="Admin: Reboot the connected Meshtastic node")
 @app_commands.describe(seconds="Delay before reboot (default 10 seconds)")
+@app_commands.checks.has_role(int(ADMIN_ROLE_ID))
 async def reboot(interaction: discord.Interaction, seconds: int = 10):
-    global reboot_in_progress
-    if not any(role.id == int(ADMIN_ROLE_ID) for role in interaction.user.roles):
-        await interaction.response.send_message("Error: You need the admin role to use this command.", ephemeral=True)
-        return
+    global reboot_in_progress, reboot_start_time
     if meshtastic_interface is None:
         await interaction.response.send_message("Error: Meshtastic device not connected.", ephemeral=True)
         return
@@ -1139,6 +1168,7 @@ async def reboot(interaction: discord.Interaction, seconds: int = 10):
             return
         meshtastic_interface.localNode.reboot(seconds)
         reboot_in_progress = True
+        reboot_start_time = time.time()
         embed = discord.Embed(
             title="Node Reboot Initiated",
             description=f"Rebooting Meshtastic node in {seconds} seconds.",
@@ -1338,7 +1368,6 @@ async def nodeinfo(interaction: discord.Interaction, node_id: str):
         longitude = position.get("longitude", "N/A")
         altitude = position.get("altitude", "N/A")
         owner_id = owners.get(node_id)
-        owner = None
         owner_text = "None"
         if owner_id:
             try:
@@ -1378,10 +1407,8 @@ async def nodeinfo(interaction: discord.Interaction, node_id: str):
 # Slash command: /addnode
 @app_commands.command(name="addnode", description="Admin: Assign a node to a user")
 @app_commands.describe(node_id="The Node ID (e.g., !abc123)", user="The user to assign the node to")
+@app_commands.checks.has_role(int(ADMIN_ROLE_ID))
 async def addnode(interaction: discord.Interaction, node_id: str, user: discord.Member):
-    if not any(role.id == int(ADMIN_ROLE_ID) for role in interaction.user.roles):
-        await interaction.response.send_message("Error: You need the admin role to use this command.", ephemeral=True)
-        return
     try:
         node_id = node_id.strip()
         nodes = meshtastic_interface.nodes if meshtastic_interface else {}
@@ -1406,10 +1433,8 @@ async def addnode(interaction: discord.Interaction, node_id: str, user: discord.
 # Slash command: /removenode
 @app_commands.command(name="removenode", description="Admin: Remove a node's ownership")
 @app_commands.describe(node_id="The Node ID (e.g., !abc123)")
+@app_commands.checks.has_role(int(ADMIN_ROLE_ID))
 async def removenode(interaction: discord.Interaction, node_id: str):
-    if not any(role.id == int(ADMIN_ROLE_ID) for role in interaction.user.roles):
-        await interaction.response.send_message("Error: You need the admin role to use this command.", ephemeral=True)
-        return
     try:
         node_id = node_id.strip()
         if node_id not in owners:
@@ -1438,7 +1463,7 @@ async def removenode(interaction: discord.Interaction, node_id: str):
     node_id="Filter by Node ID (e.g., !abc123), optional",
     owner="Filter by node owner (Discord user), optional"
 )
-async def filtermessages(interaction: discord.Interaction, node_id: str = None, owner: discord.Member = None):
+async def filtermessages(interaction: discord.Interaction, node_id: Optional[str] = None, owner: Optional[discord.Member] = None):
     if not messages:
         embed = discord.Embed(
             title="Filtered Messages",
@@ -1454,7 +1479,7 @@ async def filtermessages(interaction: discord.Interaction, node_id: str = None, 
         filter_description = []
         if node_id:
             node_id = node_id.strip()
-            if node_id not in meshtastic_interface.nodes:
+            if meshtastic_interface and node_id not in meshtastic_interface.nodes:
                 embed = discord.Embed(
                     title="Filtered Messages",
                     description=f"Node {node_id} not found.",
@@ -1531,10 +1556,8 @@ async def filtermessages(interaction: discord.Interaction, node_id: str = None, 
     message="The message to send",
     channel="The Meshtastic channel index (0-7, default 0)"
 )
+@app_commands.checks.has_role(int(ADMIN_ROLE_ID))
 async def ack(interaction: discord.Interaction, node_id: str, message: str, channel: int = 0):
-    if not any(role.id == int(ADMIN_ROLE_ID) for role in interaction.user.roles):
-        await interaction.response.send_message("Error: You need the admin role to use this command.", ephemeral=True)
-        return
     if meshtastic_interface is None:
         await interaction.response.send_message("Error: Meshtastic device not connected.", ephemeral=True)
         return
@@ -1565,10 +1588,8 @@ async def ack(interaction: discord.Interaction, node_id: str, message: str, chan
     message="The message to broadcast",
     channel="The Meshtastic channel index (0-7, default 0)"
 )
+@app_commands.checks.has_role(int(ADMIN_ROLE_ID))
 async def broadcast(interaction: discord.Interaction, message: str, channel: int = 0):
-    if not any(role.id == int(ADMIN_ROLE_ID) for role in interaction.user.roles):
-        await interaction.response.send_message("Error: You need the admin role to use this command.", ephemeral=True)
-        return
     if meshtastic_interface is None:
         await interaction.response.send_message("Error: Meshtastic device not connected.", ephemeral=True)
         return
